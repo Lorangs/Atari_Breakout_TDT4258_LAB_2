@@ -55,6 +55,8 @@ void DrawBar(unsigned int y);
 int ReadUart();
 void WriteUart(char c);
 
+int DrawBlockBorder(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int borderThickness,unsigned int blockColor, unsigned int borderColor);
+
 /*
     Sets the entire screen to a specific color.
     Assumes colour in RGB888 format (0xRRGGBB).
@@ -64,7 +66,7 @@ void WriteUart(char c);
     Returns: None
 */
 asm("ClearScreen: \n\t"
-    "   PUSH {R4-R8, LR} \n\t"         // Save registers that will be used
+    "   PUSH {R4-R11, LR} \n\t"         // Save registers that will be used
     "   MOV R8, R0 \n\t"               // Store color in R8
     "   MOV R4, #0 \n\t"               // y = 0
     "   LDR R6, =height \n\t"          // Load address of height
@@ -73,11 +75,11 @@ asm("ClearScreen: \n\t"
     "   LDRH R7, [R7] \n\t"             // Load width value
     "y_loop_start: \n\t"
     "   CMP R4, R6    \n\t"             // compare y with SCREEN_HEIGHT (240)
-    "   BEQ y_loop_end: \n\t"
+    "   BEQ y_loop_end \n\t"
     "   MOV R5, #0 \n\t"               // x = 0
     "x_loop_start: \n\t"
     "   CMP R5, R7 \n\t"             // compare x with SCREEN_WIDTH (320)
-    "   BEQ x_loop_end: \n\t"
+    "   BEQ x_loop_end \n\t"
     "   MOV R0, R5 \n\t"               // R0 = x
     "   MOV R1, R4 \n\t"               // R1 = y
     "   MOV R2, R8 \n\t"               // R2 = color
@@ -88,10 +90,18 @@ asm("ClearScreen: \n\t"
     "   ADD R4, R4, #1 \n\t"           // y++
     "   B y_loop_start \n\t"
     "y_loop_end: \n\t"
-    "   POP {R4-R8, PC} \n\t"          // Restore registers and return
+    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
 );
 
-// assumes R0 = x-coord, R1 = y-coord, R2 = colorvalue
+/*
+    Sets a pixel at (x, y) to a specific color.
+    Assumes color in RGB888 format (0xRRGGBB).
+    Arguments:
+    - R0: x-coordinate (unsigned int)
+    - R1: y-coordinate (unsigned int)
+    - R2: color (unsigned int, RGB888 format)
+    Returns: None
+*/
 asm("SetPixel: \n\t"
     "LDR R3, =VGAaddress \n\t"
     "LDR R3, [R3] \n\t"
@@ -101,8 +111,6 @@ asm("SetPixel: \n\t"
     "STRH R2, [R3,R1] \n\t"
     "BX LR"
 );
-
-// TODO: Implement the DrawBlock function in assembly. You need to accept 5 parameters, as outlined in the c declaration above (unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int color)
 
 /*
     Draws a filled rectangle on the screen starting in position (x, y).
@@ -117,22 +125,25 @@ asm("SetPixel: \n\t"
     Returns: R0 = 0 on success, R0 = -1 on error (rectangle out of bounds)
 */
 asm("DrawBlock: \n\t"
-    "   PUSH {R4-R8, LR} \n\t"         // Save registers that will be used
-    "   LDR R4, [SP, #24] \n\t"        // Load color from stack (6th position in stack)
+    "   PUSH {R4-R11, LR} \n\t"         // Save registers that will be used
+    "   LDR R4, [SP, #36] \n\t"        // Load color from stack (9th position in stack)
     "   MOV R5, #0 \n\t"               // i = 0 (height counter)
     "   LDR R6, =height \n\t"          // Load address of height
-    "   LDRH R6, [R6] \n\t"             // Load height value
+    "   LDRH R6, [R6] \n\t"            // Load height value
     "   LDR R7, =width \n\t"           // Load address of width
-    "   LDRH R7, [R7] \n\t"             // Load width value
-    "   CMP R1, R6 \n\t"               // Check if y is within bounds
-    "   BGE drawblock_end_error \n\t"
-    "   CMP R0, R7 \n\t"               // Check if x is within bounds
-    "   BGE drawblock_end_error \n\t"
+    "   LDRH R7, [R7] \n\t"            // Load width value
+    "   MOV R9, R0 \n\t"               // R9 = x
+    "   ADD R9, R9, R2 \n\t"           // R9 = x + width
+    "   CMP R9, R7 \n\t"               // Check if y is within bounds
+    "   BGT drawblock_end_error \n\t"
+    "   MOV R9, R1 \n\t"               // R9 = y
+    "   ADD R9, R9, R3 \n\t"           // R9 = y + height
+    "   CMP R9, R7 \n\t"               // Check if y is within bounds
+    "   BGT drawblock_end_error \n\t"
     "   MOV R6, R3 \n\t"               // R6 = height
     "   MOV R7, R2 \n\t"               // R7 = width
     "   MOV R9, R0 \n\t"               // R9 = x
     "   MOV R10, R1 \n\t"              // R10 = y
-
     "drawblock_y_loop_start: \n\t"
     "   CMP R5, R6 \n\t"               // Compare i with height
     "   BEQ drawblock_y_loop_end \n\t"
@@ -151,11 +162,103 @@ asm("DrawBlock: \n\t"
     "   B drawblock_y_loop_start \n\t"
     "drawblock_y_loop_end: \n\t"
     "   MOV R0, #0 \n\t"               // Success
-    "   POP {R4-R8, PC} \n\t"          // Restore registers and return
+    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
     "drawblock_end_error: \n\t"
-    "   MOV R0, #-1 \n\t"              // Error
-    "   POP {R4-R8, PC} \n\t"          // Restore registers and return
+    "   MOV R0, #-1 \n\t"              // Error. Rectangle out of bounds
+    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
 );
+
+
+/*
+    Draws a block with a border of thickness 5px in the specified color.
+    Uses the DrawBlock assembly function to draw the filled rectangle within the border.
+    Arguments:
+    - R0: x-coordinate (unsigned int)
+    - R1: y-coordinate (unsigned int)
+    - R2: width (unsigned int)
+    - R3: height (unsigned int)
+    - [SP] : borderThickness in px (unsigned int) (passed on stack)
+    - [SP + 4]: blockColor (unsigned int, RGB888 format) (passed on stack)
+    - [SP + 8]: borderColor (unsigned int, RGB888 format) (passed on stack)
+    Returns: 0 on success, -1 on error (rectangle out of bounds)
+*/
+asm("DrawBlockBorder: \n\t"
+    "   PUSH {R4-R11, LR} \n\t"         // Save registers that will be used
+    "   LDR R10, [SP, #36] \n\t"       // Load borderThickness from stack
+    "   LDR R4, [SP, #40] \n\t"        // Load blockColor from stack 
+    "   LDR R5, [SP, #44] \n\t"        // Load borderColor from stack 
+    "   LSL R11, R10, #1 \n\t"          // R11 = borderThickness * 2
+    "   CMP R2, R11 \n\t"          // Check if borderThickness * 2 < width
+    "   BLT drawblockborder_error \n\t"     // If not, branch to error handling
+    "   CMP R3, R11 \n\t"          // Check if borderThickness < height // 2
+    "   BLT drawblockborder_error \n\t"     // If not, branch to error handling
+
+    "   MOV R6, R0 \n\t"               // R6 = x
+    "   MOV R7, R1 \n\t"               // R7 = y
+    "   MOV R8, R2 \n\t"               // R8 = width
+    "   MOV R9, R3 \n\t"               // R9 = height
+    "top_border: \n\t"
+    "   MOV R0, R6 \n\t"               // x
+    "   MOV R1, R7 \n\t"               // y
+    "   MOV R2, R8 \n\t"               // width
+    "   MOV R3, R10 \n\t"              // height = borderThickness
+    "   PUSH {R5} \n\t"              // Push borderColor
+    "   BL DrawBlock \n\t"           // Call DrawBlock
+    "   POP {R5} \n\t"               // Pop borderColor
+    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
+    "   BNE drawblockborder_error \n\t"     // If not, branch to error handling
+    "bottom_border: \n\t"
+    "   MOV R0, R6 \n\t"               // x
+    "   ADD R1, R7, R9 \n\t"          // y + height 
+    "   SUB R1, R1, R10 \n\t"           // y + height - borderThickness
+    "   MOV R2, R8 \n\t"               // width
+    "   MOV R3, R10 \n\t"              // height = borderThickness
+    "   PUSH {R5} \n\t"              // Push borderColor
+    "   BL DrawBlock \n\t"           // Call DrawBlock
+    "   POP {R5} \n\t"               // Pop borderColor
+    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
+    "   BNE drawblockborder_error \n\t"     // If not, branch to error handling
+    "left_border: \n\t"
+    "   MOV R0, R6 \n\t"               // x
+    "   ADD R1, R7, R10 \n\t"         // y + borderThickness
+    "   MOV R2, R10 \n\t"               // width = borderThickness
+    "   LSL R3, R10, #1 \n\t"        // diff_height =borderThickness * 2
+    "   SUB R3, R9, R3 \n\t"               // height = height - (borderThickness * 2)
+    "   PUSH {R5} \n\t"              // Push borderColor
+    "   BL DrawBlock \n\t"           // Call DrawBlock
+    "   POP {R5} \n\t"               // Pop borderColor
+    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
+    "   BNE drawblockborder_error \n\t"     // If not, branch to error handling
+    "right_border: \n\t"
+    "   ADD R0, R6, R8 \n\t"          // x + width
+    "   SUB R0, R0, R10 \n\t"        // x + width - borderThickness
+    "   ADD R1, R7, R10 \n\t"        // y + borderThickness
+    "   MOV R2, R10 \n\t"               // width = borderThickness
+    "   LSL R3, R10, #1 \n\t"        // diff_height =borderThickness * 2
+    "   SUB R3, R9, R3 \n\t"        // height = height - (borderThickness * 2)
+    "   PUSH {R5} \n\t"              // Push borderColor
+    "   BL DrawBlock \n\t"           // Call DrawBlock
+    "   POP {R5} \n\t"               // Pop borderColor
+    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
+    "   BNE drawblockborder_error \n\t"     // If not, branch to error handling
+    "fill_block: \n\t"
+    "   ADD R0, R6, R10 \n\t"       // x = x + borderThickness
+    "   ADD R1, R7, R10 \n\t"       // y = y + borderThickness
+    "   SUB R2, R8, R10 \n\t"       // width = width - borderThickness
+    "   SUB R2, R2, R10 \n\t"       // width = width - borderThickness * 2
+    "   SUB R3, R9, R10 \n\t"       // height = height - borderThickness
+    "   SUB R3, R3, R10 \n\t"       // height = height - borderThickness * 2
+    "   PUSH {R4} \n\t"              // Push blockColor
+    "   BL DrawBlock \n\t"           // Call DrawBlock
+    "   POP {R4} \n\t"               // Pop blockColor
+    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
+    "   BNE drawblockborder_error \n\t"     // If not, branch to
+    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
+    "drawblockborder_error: \n\t"
+    "   MOV R0, #-1 \n\t"              // Error. Rectangle out of bounds
+    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
+);
+
 
 // TODO: Impelement the DrawBar function in assembly. You need to accept the parameter as outlined in the c declaration above (unsigned int y)
 asm("DrawBar: \n\t"
