@@ -68,9 +68,9 @@ asm("ClearScreen: \n\t"
     "   MOV R8, R0 \n\t"               // Store color in R8
     "   MOV R4, #0 \n\t"               // y = 0
     "   LDR R6, =height \n\t"          // Load address of height
-    "   LDR R6, [R6] \n\t"             // Load height value
+    "   LDRH R6, [R6] \n\t"             // Load height value
     "   LDR R7, =width \n\t"           // Load address of width
-    "   LDR R7, [R7] \n\t"             // Load width value
+    "   LDRH R7, [R7] \n\t"             // Load width value
     "y_loop_start: \n\t"
     "   CMP R4, R6    \n\t"             // compare y with SCREEN_HEIGHT (240)
     "   BEQ y_loop_end: \n\t"
@@ -118,12 +118,12 @@ asm("SetPixel: \n\t"
 */
 asm("DrawBlock: \n\t"
     "   PUSH {R4-R8, LR} \n\t"         // Save registers that will be used
-    "   LDR R4, [SP, #20] \n\t"        // Load color from stack (5th parameter)
+    "   LDR R4, [SP, #24] \n\t"        // Load color from stack (6th position in stack)
     "   MOV R5, #0 \n\t"               // i = 0 (height counter)
     "   LDR R6, =height \n\t"          // Load address of height
-    "   LDR R6, [R6] \n\t"             // Load height value
+    "   LDRH R6, [R6] \n\t"             // Load height value
     "   LDR R7, =width \n\t"           // Load address of width
-    "   LDR R7, [R7] \n\t"             // Load width value
+    "   LDRH R7, [R7] \n\t"             // Load width value
     "   CMP R1, R6 \n\t"               // Check if y is within bounds
     "   BGE drawblock_end_error \n\t"
     "   CMP R0, R7 \n\t"               // Check if x is within bounds
@@ -134,11 +134,11 @@ asm("DrawBlock: \n\t"
     "   MOV R10, R1 \n\t"              // R10 = y
 
     "drawblock_y_loop_start: \n\t"
-    "   CMP R5, R3 \n\t"               // Compare i with height
+    "   CMP R5, R6 \n\t"               // Compare i with height
     "   BEQ drawblock_y_loop_end \n\t"
     "   MOV R8, #0 \n\t"               // j = 0 (width counter)
     "drawblock_x_loop_start: \n\t"
-    "   CMP R8, R2 \n\t"               // Compare j with width
+    "   CMP R8, R7 \n\t"               // Compare j with width
     "   BEQ drawblock_x_loop_end \n\t"
     "   ADD R0, R9, R8 \n\t"           // R0 = x + j
     "   ADD R1, R10, R5 \n\t"          // R1 = y + i
