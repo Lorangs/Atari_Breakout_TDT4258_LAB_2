@@ -48,48 +48,23 @@ GameState currentState = Stopped;
  */
 
 // TODO: Add a C declaration for the ClearScreen assembly procedure
-void ClearScreen(unsigned int color);
 void SetPixel(unsigned int x_coord, unsigned int y_coord, unsigned int color);
 void DrawBlock(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int color);
 void DrawBar(unsigned int y);
 int ReadUart();
 void WriteUart(char c);
 
-/*
-    Sets the entire screen to a specific color.
-    Assumes colour in RGB888 format (0xRRGGBB).
-    Uses the SetPixel assembly function to set each pixel.
-    Arguments:
-    - R0: color (unsigned int, RGB888 format)
-    Returns: None
-*/
+/***
+ * Now follow the assembly implementations
+ */
+
 asm("ClearScreen: \n\t"
-    "   PUSH {R4-R8, LR} \n\t"         // Save registers that will be used
-    "   MOV R8, R0 \n\t"               // Store color in R8
-    "   MOV R4, #0 \n\t"               // y = 0
-    "   LDR R6, =height \n\t"          // Load address of height
-    "   LDR R6, [R6] \n\t"             // Load height value
-    "   LDR R7, =width \n\t"           // Load address of width
-    "   LDR R7, [R7] \n\t"             // Load width value
-    "y_loop_start: \n\t"
-    "   CMP R4, R6    \n\t"             // compare y with SCREEN_HEIGHT (240)
-    "   BEQ y_loop_end: \n\t"
-    "   MOV R5, #0 \n\t"               // x = 0
-    "x_loop_start: \n\t"
-    "   CMP R5, R7 \n\t"             // compare x with SCREEN_WIDTH (320)
-    "   BEQ x_loop_end: \n\t"
-    "   MOV R0, R5 \n\t"               // R0 = x
-    "   MOV R1, R4 \n\t"               // R1 = y
-    "   MOV R2, R8 \n\t"               // R2 = color
-    "   BL SetPixel \n\t"              // Call SetPixel(x, y, color)
-    "   ADD R5, R5, #1 \n\t"           // x++
-    "   B x_loop_start \n\t"
-    "x_loop_end: \n\t"
-    "   ADD R4, R4, #1 \n\t"           // y++
-    "   B y_loop_start \n\t"
-    "y_loop_end: \n\t"
-    "   POP {R4-R8, PC} \n\t"          // Restore registers and return
-);
+    "    PUSH {LR} \n\t"
+    "    PUSH {R4, R5} \n\t"
+    // TODO: Add ClearScreen implementation in assembly here
+    "    POP {R4,R5}\n\t"
+    "    POP {LR} \n\t"
+    "    BX LR");
 
 // assumes R0 = x-coord, R1 = y-coord, R2 = colorvalue
 asm("SetPixel: \n\t"
@@ -99,63 +74,12 @@ asm("SetPixel: \n\t"
     "LSL R0, R0, #1 \n\t"
     "ADD R1, R0 \n\t"
     "STRH R2, [R3,R1] \n\t"
-    "BX LR"
-);
+    "BX LR");
 
 // TODO: Implement the DrawBlock function in assembly. You need to accept 5 parameters, as outlined in the c declaration above (unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int color)
-
-/*
-    Draws a filled rectangle on the screen starting in position (x, y).
-    Assumes color in RGB888 format (0xRRGGBB).
-    Asserts that the rectangle fits within the screen bounds.
-    Arguments:
-    - R0: x-coordinate (unsigned int)
-    - R1: y-coordinate (unsigned int)
-    - R2: width (unsigned int)
-    - R3: height (unsigned int)
-    - [SP]: color (unsigned int, RGB888 format) (passed on stack)
-    Returns: R0 = 0 on success, R0 = -1 on error (rectangle out of bounds)
-*/
 asm("DrawBlock: \n\t"
-    "   PUSH {R4-R8, LR} \n\t"         // Save registers that will be used
-    "   LDR R4, [SP, #20] \n\t"        // Load color from stack (5th parameter)
-    "   MOV R5, #0 \n\t"               // i = 0 (height counter)
-    "   LDR R6, =height \n\t"          // Load address of height
-    "   LDR R6, [R6] \n\t"             // Load height value
-    "   LDR R7, =width \n\t"           // Load address of width
-    "   LDR R7, [R7] \n\t"             // Load width value
-    "   CMP R1, R6 \n\t"               // Check if y is within bounds
-    "   BGE drawblock_end_error \n\t"
-    "   CMP R0, R7 \n\t"               // Check if x is within bounds
-    "   BGE drawblock_end_error \n\t"
-    "   MOV R6, R3 \n\t"               // R6 = height
-    "   MOV R7, R2 \n\t"               // R7 = width
-    "   MOV R9, R0 \n\t"               // R9 = x
-    "   MOV R10, R1 \n\t"              // R10 = y
-
-    "drawblock_y_loop_start: \n\t"
-    "   CMP R5, R3 \n\t"               // Compare i with height
-    "   BEQ drawblock_y_loop_end \n\t"
-    "   MOV R8, #0 \n\t"               // j = 0 (width counter)
-    "drawblock_x_loop_start: \n\t"
-    "   CMP R8, R2 \n\t"               // Compare j with width
-    "   BEQ drawblock_x_loop_end \n\t"
-    "   ADD R0, R9, R8 \n\t"           // R0 = x + j
-    "   ADD R1, R10, R5 \n\t"          // R1 = y + i
-    "   MOV R2, R4 \n\t"               // R2 = color
-    "   BL SetPixel \n\t"              // Call SetPixel(x + j, y + i, color)
-    "   ADD R8, R8, #1 \n\t"           // j++
-    "   B drawblock_x_loop_start \n\t"
-    "drawblock_x_loop_end: \n\t"
-    "   ADD R5, R5, #1 \n\t"           // i++
-    "   B drawblock_y_loop_start \n\t"
-    "drawblock_y_loop_end: \n\t"
-    "   MOV R0, #0 \n\t"               // Success
-    "   POP {R4-R8, PC} \n\t"          // Restore registers and return
-    "drawblock_end_error: \n\t"
-    "   MOV R0, #-1 \n\t"              // Error
-    "   POP {R4-R8, PC} \n\t"          // Restore registers and return
-);
+    // TODO: Here goes your implementation
+    "BX LR");
 
 // TODO: Impelement the DrawBar function in assembly. You need to accept the parameter as outlined in the c declaration above (unsigned int y)
 asm("DrawBar: \n\t"
