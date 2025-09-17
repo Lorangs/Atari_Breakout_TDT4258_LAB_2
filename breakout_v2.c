@@ -27,7 +27,7 @@ unsigned char tiles[NROWS][NCOLS] __attribute__((used)) = { 0 }; // DON'T TOUCH 
 
 unsigned long long __attribute__((used)) UART_BASE = 0xFF201000; // JTAG UART base address
 
-
+#define BACKGROUND_COLOR black
 
 #define BAR_X_POS           10
 #define BAR_WIDTH           7
@@ -37,11 +37,8 @@ unsigned long long __attribute__((used)) UART_BASE = 0xFF201000; // JTAG UART ba
 #define BAR_COLOR_CENTER    green
 
 #define BALL_SIZE           7
+#define BALL_COLOR          blue
 
-
-/***
- * You might use and modify the struct/enum definitions below this comment
- */
 typedef struct _block
 {
     unsigned char destroyed;
@@ -65,25 +62,34 @@ typedef struct _ball
 {
     unsigned int pos_x;
     unsigned int pos_y;
-    float dir_x;          // Vector component in x direction, value between -1 and 1
-    float dir_y;          // Vector component in y direction, value between -1 and 1
+    float[2] dir_xy;    // normalized direction vector
 } Ball;
 Ball ball = 
 {
     .pos_x = BAR_X_POS + BAR_WIDTH + BALL_SIZE/2,
     .pos_y = 120,
-    .dir_x = 1.0,
-    .dir_y = 0.0
+    .dir_xy = [1.0f, 0.0f]  // initially moving to the right
 };
 
-/***
- * Here follow the C declarations for our assembly functions
- */
-
+/*
+    Function declarations for all functions. Both assembly and C.
+*/
 void ClearScreen(unsigned int color);
 void SetPixel(unsigned int x_coord, unsigned int y_coord, unsigned int color);
+void draw_block(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int color);
+void draw_bar(unsigned int y);
 int ReadUart();
 void WriteUart(char c);
+void draw_ball();
+void draw_playing_field();
+void reset();
+void play();
+void wait_for_start();
+void update_game_state();
+void update_bar_state();
+void write(char *str);
+
+
 
 
 /*
@@ -176,9 +182,6 @@ void draw_bar(unsigned int y)
     Returns: None
 
     Example for BALL_SIZE = 7:
-
-                       
-                          
                           +      
                         + + +      
                       + + + + +   
@@ -187,7 +190,6 @@ void draw_bar(unsigned int y)
                         + + +
                           +
 */
-
 void draw_ball()
 {
     int radius = (int)(BALL_SIZE / 2);
@@ -197,7 +199,7 @@ void draw_ball()
         {
             if (abs(i) + abs(j) <= radius)
             {
-                SetPixel(ball.pos_x + j, ball.pos_y + i, blue);
+                SetPixel(ball.pos_x + j, ball.pos_y + i, BALL_COLOR);
             }
         }
     }
@@ -205,6 +207,15 @@ void draw_ball()
 
 void draw_playing_field()
 {
+    for (int row = 0; row < NROWS; row++)
+    {
+        for (int col = 0; col < NCOLS; col++)
+        {
+            unsigned int block_x = col * TILE_SIZE;
+            unsigned int block_y = row * TILE_SIZE;
+
+        }
+    }
 }
 
 void update_game_state()
