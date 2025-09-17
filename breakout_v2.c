@@ -1,25 +1,43 @@
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 /***************************************************************************************************
  * DON'T REMOVE THE VARIABLES BELOW THIS COMMENT                                                   *
  **************************************************************************************************/
-unsigned long long __attribute__((used)) VGAaddress = 0xc8000000; // Memory storing pixels
+    unsigned long long __attribute__((used)) VGAaddress = 0xc8000000; // Memory storing pixels
 unsigned int __attribute__((used)) red = 0x0000F0F0;
 unsigned int __attribute__((used)) green = 0x00000F0F;
 unsigned int __attribute__((used)) blue = 0x000000FF;
 unsigned int __attribute__((used)) white = 0x0000FFFF;
 unsigned int __attribute__((used)) black = 0x0;
 
-unsigned char n_cols = 10; // <- This variable might change depending on the size of the game. Supported value range: [1,18]
+// Don't change the name of this variables
+#define NCOLS 10 // <- Supported value range: [1,18]
+#define NROWS 14 // <- This variable might change.
+#define TILE_SIZE 15 // <- Tile size, might change.
 
 char *won = "You Won";       // DON'T TOUCH THIS - keep the string as is
 char *lost = "You Lost";     // DON'T TOUCH THIS - keep the string as is
 unsigned short height = 240; // DON'T TOUCH THIS - keep the value as is
 unsigned short width = 320;  // DON'T TOUCH THIS - keep the value as is
 char font8x8[128][8];        // DON'T TOUCH THIS - this is a forward declaration
+unsigned char tiles[NROWS][NCOLS] __attribute__((used)) = { 0 }; // DON'T TOUCH THIS - this is the tile map
 /**************************************************************************************************/
 
-/***
- * TODO: Define your variables below this comment
- */
+unsigned long long __attribute__((used)) UART_BASE = 0xFF201000; // JTAG UART base address
+
+
+
+#define BAR_X_POS           10
+#define BAR_WIDTH           7
+#define BAR_CENTER_HEIGHT   15
+#define BAR_EDGE_HEIGHT     15
+#define BAR_COLOR_EDGES     red
+#define BAR_COLOR_CENTER    green
+
+#define BALL_SIZE           7
+
 
 /***
  * You might use and modify the struct/enum definitions below this comment
@@ -43,19 +61,30 @@ typedef enum _gameState
 } GameState;
 GameState currentState = Stopped;
 
+typedef struct _ball
+{
+    unsigned int pos_x;
+    unsigned int pos_y;
+    float dir_x;          // Vector component in x direction, value between -1 and 1
+    float dir_y;          // Vector component in y direction, value between -1 and 1
+} Ball;
+Ball ball = 
+{
+    .pos_x = BAR_X_POS + BAR_WIDTH + BALL_SIZE/2,
+    .pos_y = 120,
+    .dir_x = 1.0,
+    .dir_y = 0.0
+};
+
 /***
  * Here follow the C declarations for our assembly functions
  */
 
-// TODO: Add a C declaration for the ClearScreen assembly procedure
 void ClearScreen(unsigned int color);
 void SetPixel(unsigned int x_coord, unsigned int y_coord, unsigned int color);
-int DrawBlock(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int color);
-int DrawBar(unsigned int y);
 int ReadUart();
 void WriteUart(char c);
 
-int DrawBlockBorder(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int borderThickness,unsigned int blockColor, unsigned int borderColor);
 
 /*
     Sets the entire screen to a specific color.
@@ -93,15 +122,7 @@ asm("ClearScreen: \n\t"
     "   POP {R4-R11, PC} \n\t"          // Restore registers and return
 );
 
-/*
-    Sets a pixel at (x, y) to a specific color.
-    Assumes color in RGB888 format (0xRRGGBB).
-    Arguments:
-    - R0: x-coordinate (unsigned int)
-    - R1: y-coordinate (unsigned int)
-    - R2: color (unsigned int, RGB888 format)
-    Returns: None
-*/
+// assumes R0 = x-coord, R1 = y-coord, R2 = colorvalue
 asm("SetPixel: \n\t"
     "LDR R3, =VGAaddress \n\t"
     "LDR R3, [R3] \n\t"
@@ -109,192 +130,77 @@ asm("SetPixel: \n\t"
     "LSL R0, R0, #1 \n\t"
     "ADD R1, R0 \n\t"
     "STRH R2, [R3,R1] \n\t"
-    "BX LR"
-);
-
-/*
-    Draws a filled rectangle on the screen starting in position (x, y).
-    Assumes color in RGB888 format (0xRRGGBB).
-    Asserts that the rectangle fits within the screen bounds.
-    Arguments:
-    - R0: x-coordinate (unsigned int)
-    - R1: y-coordinate (unsigned int)
-    - R2: width (unsigned int)
-    - R3: height (unsigned int)
-    - [SP]: color (unsigned int, RGB888 format) (passed on stack)
-    Returns: R0 = 0 on success, R0 = -1 on error (rectangle out of bounds)
-*/
-asm("DrawBlock: \n\t"
-    "   PUSH {R4-R11, LR} \n\t"         // Save registers that will be used
-    "   LDR R4, [SP, #36] \n\t"        // Load color from stack (9th position in stack)
-    "   MOV R5, #0 \n\t"               // i = 0 (height counter)
-    "   LDR R6, =height \n\t"          // Load address of height
-    "   LDRH R6, [R6] \n\t"            // Load height value
-    "   LDR R7, =width \n\t"           // Load address of width
-    "   LDRH R7, [R7] \n\t"            // Load width value
-    "   MOV R9, R0 \n\t"               // R9 = x
-    "   ADD R9, R9, R2 \n\t"           // R9 = x + width
-    "   CMP R9, R7 \n\t"               // Check if y is within bounds
-    "   BGT drawblock_end_error \n\t"
-    "   MOV R9, R1 \n\t"               // R9 = y
-    "   ADD R9, R9, R3 \n\t"           // R9 = y + height
-    "   CMP R9, R7 \n\t"               // Check if y is within bounds
-    "   BGT drawblock_end_error \n\t"
-    "   MOV R6, R3 \n\t"               // R6 = height
-    "   MOV R7, R2 \n\t"               // R7 = width
-    "   MOV R9, R0 \n\t"               // R9 = x
-    "   MOV R10, R1 \n\t"              // R10 = y
-    "drawblock_y_loop_start: \n\t"
-    "   CMP R5, R6 \n\t"               // Compare i with height
-    "   BEQ drawblock_y_loop_end \n\t"
-    "   MOV R8, #0 \n\t"               // j = 0 (width counter)
-    "drawblock_x_loop_start: \n\t"
-    "   CMP R8, R7 \n\t"               // Compare j with width
-    "   BEQ drawblock_x_loop_end \n\t"
-    "   ADD R0, R9, R8 \n\t"           // R0 = x + j
-    "   ADD R1, R10, R5 \n\t"          // R1 = y + i
-    "   MOV R2, R4 \n\t"               // R2 = color
-    "   BL SetPixel \n\t"              // Call SetPixel(x + j, y + i, color)
-    "   ADD R8, R8, #1 \n\t"           // j++
-    "   B drawblock_x_loop_start \n\t"
-    "drawblock_x_loop_end: \n\t"
-    "   ADD R5, R5, #1 \n\t"           // i++
-    "   B drawblock_y_loop_start \n\t"
-    "drawblock_y_loop_end: \n\t"
-    "   MOV R0, #0 \n\t"               // Success
-    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
-    "drawblock_end_error: \n\t"
-    "   MOV R0, #-1 \n\t"              // Error. Rectangle out of bounds
-    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
-);
-
-
-/*
-    Draws a block with a border of thickness 5px in the specified color.
-    Uses the DrawBlock assembly function to draw the filled rectangle within the border.
-    Arguments:
-    - R0: x-coordinate (unsigned int)
-    - R1: y-coordinate (unsigned int)
-    - R2: width (unsigned int)
-    - R3: height (unsigned int)
-    - [SP] : borderThickness in px (unsigned int) (passed on stack)
-    - [SP + 4]: blockColor (unsigned int, RGB888 format) (passed on stack)
-    - [SP + 8]: borderColor (unsigned int, RGB888 format) (passed on stack)
-    Returns: 0 on success, -1 on error (rectangle out of bounds)
-*/
-asm("DrawBlockBorder: \n\t"
-    "   PUSH {R4-R11, LR} \n\t"         // Save registers that will be used
-    "   LDR R10, [SP, #36] \n\t"       // Load borderThickness from stack
-    "   LDR R4, [SP, #40] \n\t"        // Load blockColor from stack 
-    "   LDR R5, [SP, #44] \n\t"        // Load borderColor from stack 
-    "   LSL R11, R10, #1 \n\t"          // R11 = borderThickness * 2
-    "   CMP R2, R11 \n\t"          // Check if borderThickness * 2 < width
-    "   BLT drawblockborder_error \n\t"     // If not, branch to error handling
-    "   CMP R3, R11 \n\t"          // Check if borderThickness < height // 2
-    "   BLT drawblockborder_error \n\t"     // If not, branch to error handling
-    "   MOV R6, R0 \n\t"               // R6 = x
-    "   MOV R7, R1 \n\t"               // R7 = y
-    "   MOV R8, R2 \n\t"               // R8 = width
-    "   MOV R9, R3 \n\t"               // R9 = height
-    "top_border: \n\t"
-    "   MOV R0, R6 \n\t"               // x
-    "   MOV R1, R7 \n\t"               // y
-    "   MOV R2, R8 \n\t"               // width
-    "   MOV R3, R10 \n\t"              // height = borderThickness
-    "   PUSH {R5} \n\t"              // Push borderColor
-    "   BL DrawBlock \n\t"           // Call DrawBlock
-    "   POP {R5} \n\t"               // Pop borderColor
-    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
-    "   BNE drawblockborder_error \n\t"     // If not, branch to error handling
-    "bottom_border: \n\t"
-    "   MOV R0, R6 \n\t"               // x
-    "   ADD R1, R7, R9 \n\t"          // y + height 
-    "   SUB R1, R1, R10 \n\t"           // y + height - borderThickness
-    "   MOV R2, R8 \n\t"               // width
-    "   MOV R3, R10 \n\t"              // height = borderThickness
-    "   PUSH {R5} \n\t"              // Push borderColor
-    "   BL DrawBlock \n\t"           // Call DrawBlock
-    "   POP {R5} \n\t"               // Pop borderColor
-    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
-    "   BNE drawblockborder_error \n\t"     // If not, branch to error handling
-    "left_border: \n\t"
-    "   MOV R0, R6 \n\t"               // x
-    "   ADD R1, R7, R10 \n\t"         // y + borderThickness
-    "   MOV R2, R10 \n\t"               // width = borderThickness
-    "   LSL R3, R10, #1 \n\t"        // diff_height =borderThickness * 2
-    "   SUB R3, R9, R3 \n\t"               // height = height - (borderThickness * 2)
-    "   PUSH {R5} \n\t"              // Push borderColor
-    "   BL DrawBlock \n\t"           // Call DrawBlock
-    "   POP {R5} \n\t"               // Pop borderColor
-    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
-    "   BNE drawblockborder_error \n\t"     // If not, branch to error handling
-    "right_border: \n\t"
-    "   ADD R0, R6, R8 \n\t"          // x + width
-    "   SUB R0, R0, R10 \n\t"        // x + width - borderThickness
-    "   ADD R1, R7, R10 \n\t"        // y + borderThickness
-    "   MOV R2, R10 \n\t"               // width = borderThickness
-    "   LSL R3, R10, #1 \n\t"        // diff_height =borderThickness * 2
-    "   SUB R3, R9, R3 \n\t"        // height = height - (borderThickness * 2)
-    "   PUSH {R5} \n\t"              // Push borderColor
-    "   BL DrawBlock \n\t"           // Call DrawBlock
-    "   POP {R5} \n\t"               // Pop borderColor
-    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
-    "   BNE drawblockborder_error \n\t"     // If not, branch to error handling
-    "fill_block: \n\t"
-    "   ADD R0, R6, R10 \n\t"       // x = x + borderThickness
-    "   ADD R1, R7, R10 \n\t"       // y = y + borderThickness
-    "   SUB R2, R8, R10 \n\t"       // width = width - borderThickness
-    "   SUB R2, R2, R10 \n\t"       // width = width - borderThickness * 2
-    "   SUB R3, R9, R10 \n\t"       // height = height - borderThickness
-    "   SUB R3, R3, R10 \n\t"       // height = height - borderThickness * 2
-    "   PUSH {R4} \n\t"              // Push blockColor
-    "   BL DrawBlock \n\t"           // Call DrawBlock
-    "   POP {R4} \n\t"               // Pop blockColor
-    "   CMP R0, #0 \n\t"              // Check if DrawBlock was successful
-    "   BNE drawblockborder_error \n\t"     // If not, branch to
-    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
-    "drawblockborder_error: \n\t"
-    "   MOV R0, #-1 \n\t"              // Error. Rectangle out of bounds
-    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
-);
-
-
-/*
-    Draws the bar at the specified y-coordinate. x-coordinate is fixed to 10. 
-    Uses the DrawBlock assembly function to draw the filled rectangle. Borderthickness is fixed to 2px.
-    Arguments:
-    - R0: y-coordinate (unsigned int) top position of the bar
-    Returns: 
-    - R0: 0 on success, -1 on error (rectangle out of bounds) See DrawBlockBorder for error handling
-*/
-asm("DrawBar: \n\t"
-    "   PUSH {R4-R11, LR} \n\t"         // Save registers that will be used
-    "   MOV R1, R0  \n\t"               // R1 = y
-    "   MOV R0, #10 \n\t"              // x = 10
-    "   MOV R2, #10 \n\t"              // width = 10
-    "   MOV R3, #50 \n\t"              // height = 50
-
-    "   MOV R4, #0x00FF00 \n\t"         // Load color GREEN = 0x00FF00
-    "   PUSH {R4} \n\t"                 // Push Bordercolour 
-    "   MOV R4, #0x000000 \n\t"         // Load color BLACK = 0x000000
-    "   PUSH {R4} \n\t"                 // Push Blockcolour
-    "   MOV R4, #2 \n\t"                // Load borderThickness = 2px
-    "   PUSH {R4} \n\t"                 // Push borderThickness = 2px
-    "   BL DrawBlockBorder \n\t"        // Call DrawBlockBorder
-    "   ADD SP, SP, #12 \n\t"           // Clean up stack (3 * 4 bytes)
-    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
-);
+    "BX LR");
 
 asm("ReadUart:\n\t"
     "LDR R1, =0xFF201000 \n\t"
     "LDR R0, [R1]\n\t"
     "BX LR");
 
-// TODO: Add the WriteUart assembly procedure here that respects the WriteUart C declaration on line 46
+/*
+    Writes a character to the JTAG UART.
+    Arguments:
+    - R0: character to write (unsigned int, only the lowest byte is used)
+    Returns: None
+*/
+asm("WriteUart:\n\t"
+    "LDR R1, =UART_BASE \n\t"
+    "LDR R1, [R1] \n\t"
+    "STR R0, [R1]\n\t"
+    "BX LR"
+);
 
-// TODO: Implement the C functions below
+
+void draw_block(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int color)
+{
+    for (unsigned int i = 0; i < height; i++){
+        for (unsigned int j = 0; j < width; j++){
+            SetPixel(x + j, y + i, color);
+        }
+    }
+}
+
+void draw_bar(unsigned int y)
+{
+    draw_block(BAR_X_POS, y, BAR_WIDTH, BAR_EDGE_HEIGHT, BAR_COLOR_EDGES);                                          // Draw top part of Bar
+    draw_block(BAR_X_POS, y + BAR_EDGE_HEIGHT, BAR_WIDTH, BAR_CENTER_HEIGHT, BAR_COLOR_CENTER);                     // Draw center part of Bar
+    draw_block(BAR_X_POS, y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT, BAR_WIDTH, BAR_EDGE_HEIGHT, BAR_COLOR_EDGES);    // Draw bottom part of Bar
+}
+
+
+/*
+    Draws a ball at the center of the screen.
+    BALL_SIZE defines the width and height of the ball.
+    Center of the ball is at (width/2, height/2) and indicates the center of the ball.
+    Arguments: None
+    Returns: None
+
+    Example for BALL_SIZE = 7:
+
+                       
+                          
+                          +      
+                        + + +      
+                      + + + + +   
+                    + + + + + + +   
+                      + + + + +
+                        + + +
+                          +
+*/
+
 void draw_ball()
 {
+    int radius = (int)(BALL_SIZE / 2);
+    for (int i = -radius; i <= radius; i++)
+    {
+        for (int j = -radius; j <= radius; j++)
+        {
+            if (abs(i) + abs(j) <= radius)
+            {
+                SetPixel(ball.pos_x + j, ball.pos_y + i, blue);
+            }
+        }
+    }
 }
 
 void draw_playing_field()
@@ -343,7 +249,7 @@ void play()
         }
         draw_playing_field();
         draw_ball();
-        DrawBar(120); // TODO: replace the constant value with the current position of the bar
+        draw_bar(120); // TODO: replace the constant value with the current position of the bar
     }
     if (currentState == Won)
     {
@@ -360,6 +266,7 @@ void play()
     currentState = Stopped;
 }
 
+// It must initialize the game
 void reset()
 {
     // Hint: This is draining the UART buffer
@@ -385,9 +292,11 @@ void wait_for_start()
 
 int main(int argc, char *argv[])
 {
-    ClearScreen();
+    ClearScreen(0);
+    draw_ball();
 
-    // HINT: This loop allows the user to restart the game after loosing/winning the previous game
+
+/*     // HINT: This loop allows the user to restart the game after loosing/winning the previous game
     while (1)
     {
         wait_for_start();
@@ -397,7 +306,7 @@ int main(int argc, char *argv[])
         {
             break;
         }
-    }
+    } */
     return 0;
 }
 
