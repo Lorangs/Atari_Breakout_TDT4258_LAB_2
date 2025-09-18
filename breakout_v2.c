@@ -5,7 +5,7 @@
 /***************************************************************************************************
  * DON'T REMOVE THE VARIABLES BELOW THIS COMMENT                                                   *
  **************************************************************************************************/
-    unsigned long long __attribute__((used)) VGAaddress = 0xc8000000; // Memory storing pixels
+unsigned long long __attribute__((used)) VGAaddress = 0xc8000000; // Memory storing pixels
 unsigned int __attribute__((used)) red = 0x0000F0F0;
 unsigned int __attribute__((used)) green = 0x00000F0F;
 unsigned int __attribute__((used)) blue = 0x000000FF;
@@ -14,7 +14,7 @@ unsigned int __attribute__((used)) black = 0x0;
 
 // Don't change the name of this variables
 #define NCOLS 10 // <- Supported value range: [1,18]
-#define NROWS 14 // <- This variable might change.
+#define NROWS 16 // <- This variable might change.
 #define TILE_SIZE 15 // <- Tile size, might change.
 
 char *won = "You Won";       // DON'T TOUCH THIS - keep the string as is
@@ -28,25 +28,41 @@ unsigned char tiles[NROWS][NCOLS] __attribute__((used)) = { 0 }; // DON'T TOUCH 
 unsigned long long __attribute__((used)) UART_BASE = 0xFF201000; // JTAG UART base address
 
 #define BACKGROUND_COLOR black
+#define BORDER_WIDTH 2  
+#define BORDER_COLOR white
 
 #define BAR_X_POS           10
 #define BAR_WIDTH           7
 #define BAR_CENTER_HEIGHT   15
 #define BAR_EDGE_HEIGHT     15
+#define BAR_SPEED           5
 #define BAR_COLOR_EDGES     red
 #define BAR_COLOR_CENTER    green
 
-#define BALL_SIZE           7
+#define BALL_RADIUS         3
 #define BALL_COLOR          blue
 
 typedef struct _block
 {
     unsigned char destroyed;
-    unsigned char deleted;
     unsigned int pos_x;
     unsigned int pos_y;
     unsigned int color;
 } Block;
+
+
+typedef struct _bar
+{
+    unsigned int pos_x;         // x-coordinate of the left of the bar (constant)
+    unsigned int pos_y;         // y-coordinate of the top of the bar
+} Bar;
+
+typedef struct _ball
+{
+    unsigned int pos_x;
+    unsigned int pos_y;
+    float dir_xy[2];    // normalized direction vector
+} Ball;
 
 typedef enum _gameState
 {
@@ -56,28 +72,17 @@ typedef enum _gameState
     Lost = 3,
     Exit = 4,
 } GameState;
-GameState currentState = Stopped;
 
-typedef struct _ball
-{
-    unsigned int pos_x;
-    unsigned int pos_y;
-    float[2] dir_xy;    // normalized direction vector
-} Ball;
-Ball ball = 
-{
-    .pos_x = BAR_X_POS + BAR_WIDTH + BALL_SIZE/2,
-    .pos_y = 120,
-    .dir_xy = [1.0f, 0.0f]  // initially moving to the right
-};
+
+
 
 /*
-    Function declarations for all functions. Both assembly and C.
+Function declarations for all functions. Both assembly and C.
 */
 void ClearScreen(unsigned int color);
 void SetPixel(unsigned int x_coord, unsigned int y_coord, unsigned int color);
-void draw_block(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int color);
-void draw_bar(unsigned int y);
+void draw_block(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int color);
+void draw_bar();
 int ReadUart();
 void WriteUart(char c);
 void draw_ball();
@@ -90,6 +95,20 @@ void update_bar_state();
 void write(char *str);
 
 
+// Initillize global variables
+GameState currentState = Stopped;
+Block board_tiles[NROWS][NCOLS] __attribute__((used)); // game board
+Ball ball = 
+{
+    .pos_x = BAR_X_POS + BAR_WIDTH + BALL_RADIUS,
+    .pos_y = 120,
+    .dir_xy = {1.0f, 0.0f}  // initially moving to the right
+};
+Bar bar = 
+{ 
+    .pos_x = BAR_X_POS,
+    .pos_y = (unsigned int)(60 - (BAR_CENTER_HEIGHT/2 + BAR_EDGE_HEIGHT)) 
+};
 
 
 /*
@@ -113,7 +132,7 @@ asm("ClearScreen: \n\t"
     "   BEQ y_loop_end \n\t"
     "   MOV R5, #0 \n\t"               // x = 0
     "x_loop_start: \n\t"
-    "   CMP R5, R7 \n\t"             // compare x with SCREEN_WIDTH (320)
+    "   CMP R5, R7 \n\t"                // compare x with SCREEN_WIDTH (320)
     "   BEQ x_loop_end \n\t"
     "   MOV R0, R5 \n\t"               // R0 = x
     "   MOV R1, R4 \n\t"               // R1 = y
@@ -138,6 +157,13 @@ asm("SetPixel: \n\t"
     "STRH R2, [R3,R1] \n\t"
     "BX LR");
 
+
+/*
+    Reads a character from the JTAG UART.
+    Arguments: None
+    Returns:
+    - R0: character read (unsigned int, only the lowest byte is used)
+*/
 asm("ReadUart:\n\t"
     "LDR R1, =0xFF201000 \n\t"
     "LDR R0, [R1]\n\t"
@@ -157,20 +183,75 @@ asm("WriteUart:\n\t"
 );
 
 
-void draw_block(unsigned int x, unsigned int y, unsigned int width, unsigned int height, unsigned int color)
+void draw_block(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int color)
 {
-    for (unsigned int i = 0; i < height; i++){
-        for (unsigned int j = 0; j < width; j++){
+    assert(w > BORDER_WIDTH && h > BORDER_WIDTH);
+    unsigned int i, j;
+
+    // Draw top border around the block
+    for (i = 0; i < BORDER_WIDTH; i++){
+        for (j = 0; j < w; j++){
+            SetPixel(x + j, y + i, BORDER_COLOR);
+        }
+    }
+    // Draw bottom border around the block. Assumes height > BORDER_WIDTH
+    for (i = (h - BORDER_WIDTH); i < h; i++){
+        for (j = 0; j < w; j++){
+            SetPixel(x + j, y + i, BORDER_COLOR);
+        }
+    }
+    // Draw leftmost border edge
+    for (i = BORDER_WIDTH; i < (h - BORDER_WIDTH); i++){
+        for (j = 0; j < BORDER_WIDTH; j++){
+            SetPixel(x + j, y + i, BORDER_COLOR);
+        }
+    }
+    // Draw rightmost border edge
+    for (i = BORDER_WIDTH; i < (h - BORDER_WIDTH); i++){
+        for (j = (w - BORDER_WIDTH); j < w; j++){
+            SetPixel(x + j, y + i, BORDER_COLOR);
+        }
+    }
+
+    // Fill the space inside the border with the given color
+    for (i = BORDER_WIDTH; i < (h - BORDER_WIDTH); i++){
+        for (j = BORDER_WIDTH; j < (w - BORDER_WIDTH); j++){
             SetPixel(x + j, y + i, color);
         }
     }
 }
 
-void draw_bar(unsigned int y)
+void draw_bar()
 {
-    draw_block(BAR_X_POS, y, BAR_WIDTH, BAR_EDGE_HEIGHT, BAR_COLOR_EDGES);                                          // Draw top part of Bar
-    draw_block(BAR_X_POS, y + BAR_EDGE_HEIGHT, BAR_WIDTH, BAR_CENTER_HEIGHT, BAR_COLOR_CENTER);                     // Draw center part of Bar
-    draw_block(BAR_X_POS, y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT, BAR_WIDTH, BAR_EDGE_HEIGHT, BAR_COLOR_EDGES);    // Draw bottom part of Bar
+    // Draw top part of Bar
+    draw_block
+    (
+        bar.pos_x, 
+        bar.pos_y, 
+        BAR_WIDTH, 
+        BAR_EDGE_HEIGHT, 
+        BAR_COLOR_EDGES
+    );    
+    
+    // Draw center part of Bar
+    draw_block
+    (
+        bar.pos_x, 
+        bar.pos_y + BAR_EDGE_HEIGHT, 
+        BAR_WIDTH, 
+        BAR_CENTER_HEIGHT, 
+        BAR_COLOR_CENTER
+    );     
+    
+    // Draw bottom part of Bar
+    draw_block
+    (
+        bar.pos_x, 
+        bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT, 
+        BAR_WIDTH, 
+        BAR_EDGE_HEIGHT, 
+        BAR_COLOR_EDGES
+    ); 
 }
 
 
@@ -182,22 +263,22 @@ void draw_bar(unsigned int y)
     Returns: None
 
     Example for BALL_SIZE = 7:
-                          +      
+                        +      
                         + + +      
-                      + + + + +   
+                    + + + + +   
                     + + + + + + +   
-                      + + + + +
+                    + + + + +
                         + + +
-                          +
+                        +
 */
 void draw_ball()
 {
-    int radius = (int)(BALL_SIZE / 2);
-    for (int i = -radius; i <= radius; i++)
+    
+    for (int i = -BALL_RADIUS; i <= BALL_RADIUS; i++)
     {
-        for (int j = -radius; j <= radius; j++)
+        for (int j = -BALL_RADIUS; j <= BALL_RADIUS; j++)
         {
-            if (abs(i) + abs(j) <= radius)
+            if (abs(i) + abs(j) <= BALL_RADIUS)
             {
                 SetPixel(ball.pos_x + j, ball.pos_y + i, BALL_COLOR);
             }
@@ -205,15 +286,47 @@ void draw_ball()
     }
 }
 
+
+/*
+    Initilizes the board_tiles array with the correct positions and colors.
+    Arguments:
+    - c: color of the blocks (unsigned int, RGB888 format)
+    Returns: None
+*/
+void initilize_board_tile(unsigned int c)
+{
+    for (int row = 0; row < NROWS; row++)
+    {
+        for (int col = 0; col < NCOLS; col++)
+        {
+            board_tiles[row][col].pos_x = width - (TILE_SIZE * (col + 1));
+            board_tiles[row][col].pos_y = height - (TILE_SIZE * (row + 1));
+            board_tiles[row][col].color = c;
+            board_tiles[row][col].destroyed = 0;
+        }
+    }
+}
+
+
+
+/*
+    Fill out the rightmmost part of the game with NROWS x NCOLS blocks
+    Initilize the board_tiles array with the correct positions and colors.
+*/
 void draw_playing_field()
 {
     for (int row = 0; row < NROWS; row++)
     {
         for (int col = 0; col < NCOLS; col++)
         {
-            unsigned int block_x = col * TILE_SIZE;
-            unsigned int block_y = row * TILE_SIZE;
-
+            draw_block
+            (
+                board_tiles[row][col].pos_x,
+                board_tiles[row][col].pos_y,
+                TILE_SIZE,
+                TILE_SIZE,
+                board_tiles[row][col].color
+            );   
         }
     }
 }
@@ -225,30 +338,102 @@ void update_game_state()
         return;
     }
 
-    // TODO: Check: game won? game lost?
+    // Game is won if the ball reaches the right side of the screen
+    if (ball.pos_x + BALL_RADIUS >= 320) {
+        currentState = Won;
+        return;
+    }
+    // Game is lost if the ball drops below the bar.
+    if (ball.pos_x - BALL_RADIUS <= 7) {
+        currentState = Lost;
+        return;
+    }
+    
+
 
     // TODO: Update balls position and direction
+
+
 
     // TODO: Hit Check with Blocks
     // HINT: try to only do this check when we potentially have a hit, as it is relatively expensive and can slow down game play a lot
 }
 
+
+/*
+    Reads all characters in the UART Buffer and apply the respective bar position updates
+    Arguments: None
+    Returns: None
+*/
 void update_bar_state()
 {
     int remaining = 0;
-    // TODO: Read all chars in the UART Buffer and apply the respective bar position updates
-    // HINT: w == 77, s == 73
+    // Read all chars in the UART Buffer and apply the respective bar position updates
+    // HINT: w == 119 (0x77), s == 115 (0x73)
     // HINT Format: 0x00 'Remaining Chars':2 'Ready 0x80':2 'Char 0xXX':2, sample: 0x00018077 (1 remaining character, buffer is ready, current character is 'w')
+    do
+    {
+        unsigned long long out = ReadUart();
+        if (!(out & 0x8000))
+        {
+            // not valid - abort reading
+            return;
+        }
+        if ((out & 0xFF) == 0x77) // 'w' - move up
+        {
+            if (bar.pos_y >= BAR_SPEED)
+            {
+                bar.pos_y -= BAR_SPEED;
+
+                // draw the space where the bar was previously 
+                draw_block
+                (
+                    bar.pos_x, 
+                    bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT + BAR_EDGE_HEIGHT, 
+                    BAR_WIDTH, 
+                    BAR_SPEED, 
+                    BACKGROUND_COLOR
+                );
+            }
+        }
+        else if ((out & 0xFF) == 0x73) // 's' - move down
+        {
+            if (bar.pos_y <= ((height - BAR_CENTER_HEIGHT - BAR_EDGE_HEIGHT*2) - BAR_SPEED))
+            {
+                // draw the space where the bar was previously
+                draw_block
+                (
+                    bar.pos_x, 
+                    bar.pos_y , 
+                    BAR_WIDTH, 
+                    BAR_SPEED, 
+                    BACKGROUND_COLOR
+                );
+
+                bar.pos_y += BAR_SPEED;
+            }
+        }
+        remaining = (out & 0xFF0000) >> 4;
+    } while (remaining > 0);
 }
 
+/*
+    Writes a string to the JTAG UART. Iterates until it finds the null-termination character.
+    Arguments:
+    - str: pointer to the string to write (char*)
+    Returns: None
+*/
 void write(char *str)
 {
-    // TODO: Use WriteUart to write the string to JTAG UART
+    while (*str)
+    {
+        WriteUart(*str++);
+    }
 }
 
 void play()
 {
-    ClearScreen();
+    ClearScreen(black);
     // HINT: This is the main game loop
     while (1)
     {
@@ -303,8 +488,15 @@ void wait_for_start()
 
 int main(int argc, char *argv[])
 {
-    ClearScreen(0);
+    ClearScreen(black);
+    initilize_board_tile(green);
+    draw_playing_field();
     draw_ball();
+    while(1)
+    {
+        update_bar_state();
+        draw_bar(); 
+    }
 
 
 /*     // HINT: This loop allows the user to restart the game after loosing/winning the previous game
