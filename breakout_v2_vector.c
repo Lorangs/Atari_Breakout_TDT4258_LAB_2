@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <math.h>
 
 /*
     Some not for myself.
@@ -270,7 +271,7 @@ void draw_block
     unsigned int color      // color to fill the block with (unsigned int, RGB888 format)
 )
 {
-    assert(x>=0 && (x+w)<width);
+    assert(x>=0 && (x+w)<width && y>=0 && (y+h)<height); // Bounds check to ensure block is within screen limits
     unsigned int i, j;
 
     // Fill the entire block with the given color
@@ -479,8 +480,8 @@ void update_bar_state()
 void draw_ball()
 {
     // Bounds check to ensure ball position is within screen limits
-    assert(ball.pos_x >= 0 && ball.pos_x < width);
-    assert(ball.pos_y >= 0 && ball.pos_y < height);
+    assert((ball.pos_x-BALL_RADIUS) >= 0 && (ball.pos_x+BALL_RADIUS) < width);
+    assert((ball.pos_y-BALL_RADIUS) >= 0 && (ball.pos_y+BALL_RADIUS) < height);
 
     for (int i = -BALL_RADIUS; i <= BALL_RADIUS; i++)
     {
@@ -520,28 +521,61 @@ void update_ball_state()
         return;
     }
  */
+    // Check for collision with top wall
+    if (ball.pos_y - BALL_RADIUS <= 0)
+    {
+        ball.dir_y = -ball.dir_y; // Reverse y direction
+        ball.pos_y = BALL_RADIUS; // Prevent sticking to the wall
+    }
+    // Check for collision with bottom wall
+    else if (ball.pos_y + BALL_RADIUS >= height)
+    {
+        ball.dir_y = -ball.dir_y; // Reverse y direction
+        ball.pos_y = height - BALL_RADIUS; // Prevent sticking to the wall
+    }
+
+    // Check for collision with bar
+    if (ball.pos_x - BALL_RADIUS <= bar.pos_x + BAR_WIDTH &&
+        ball.pos_x + BALL_RADIUS >= bar.pos_x &&
+        ball.pos_y + BALL_RADIUS >= bar.pos_y &&
+        ball.pos_y - BALL_RADIUS <= bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT + BAR_EDGE_HEIGHT)
+    {
+        ball.dir_x = -ball.dir_x; // Reverse x direction
+
+        // Adjust y direction based on where it hit the bar. hit_pos is a proportional value ranging from -BAR_CENTER_HEIGHT/2 to BAR_CENTER_HEIGHT/2
+        int hit_pos = ball.pos_y - (bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT / 2);
+
+
+        // Scale hit position to range [-32767, 32767] based on where it hit the bar
+        ball.dir_y = (hit_pos * 32767) / (BAR_CENTER_HEIGHT / 2);
+
+        // Normalize direction vector
+        int magnitude = (int)sqrt(ball.dir_x * ball.dir_x + ball.dir_y * ball.dir_y);
+        ball.dir_x = (ball.dir_x * 32767) / magnitude;
+        ball.dir_y = (ball.dir_y * 32767) / magnitude;
+
+        ball.pos_x = bar.pos_x + BAR_WIDTH + BALL_RADIUS; // Prevent sticking to the bar
+    }
+
+    // check for collision with blocks
+
     //clear previous ball position
- /*  draw_block
+    draw_block
     (
         ball.pos_x - BALL_RADIUS,
         ball.pos_y - BALL_RADIUS,
-        2 * BALL_RADIUS + 1,
-        2 * BALL_RADIUS + 1,
+        2 * BALL_RADIUS + 1,        // plus one to include the center pixel
+        2 * BALL_RADIUS + 1,        // plus one to include the center pixel
         BACKGROUND_COLOR
-    );*/
+    );
 
     // Update ball position based on current direction and speed
     ball.pos_x += (int)((ball.dir_x * BALL_SPEED) / 32767);
-    ball.pos_y -= (int)((ball.dir_y * BALL_SPEED) / 32767); // Subtracting because screen y-coordinates increase downwards
-    // Draw the ball at its new position
-    draw_ball();
+    ball.pos_y -= (int)((ball.dir_y * BALL_SPEED) / 32767);     // Subtracting because screen y-coordinates increase downwards
+    
+    draw_ball();    // Draw the ball at its new position
 }
 
-
-void check_ball_collisions()
-{
-
-}
 
 
 /*
