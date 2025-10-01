@@ -1,66 +1,52 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <math.h>
-
-
 /**
- * @file breakout.c
+ * @file breakout_personilized.c
  * @brief Advanced Breakout Game Implementation with Collision-Based Interpolation
  * 
  * This implementation features precise ball movement using ray casting and collision prediction,
  * smooth interpolation between collision points, and optimized collision detection system.
  * 
  * Key Features:
- * - Ray casting for collision prediction
- * - Collision-based interpolation for smooth movement
- * - AABB collision detection for blocks
- * - Precise wall, bar, and block collision handling
+ *      - Ray casting for collision prediction
+ *      - Collision-based interpolation for smooth movement
+ *      - AABB collision detection for blocks
+ *      - Precise wall, bar, and block collision handling
+ * 
+ * Author: 
+ *      Lorang Strand, with some help from github copilot.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <math.h>
 
-/***************************************************************************************************
- * DON'T REMOVE THE VARIABLES BELOW THIS COMMENT                                                   *
- **************************************************************************************************/
-static const unsigned long long __attribute__((used)) VGAaddress = 0xc8000000; // Memory storing pixels
-static const unsigned int __attribute__((used)) red = 0x0000F0F0;           // Redefined as static constant.
-static const unsigned int __attribute__((used)) green = 0x00000F0F;         // Redefined as static constant.
-static const unsigned int __attribute__((used)) blue = 0x000000FF;          // Redefined as static constant.
-static const unsigned int __attribute__((used)) yellow = 0x0000FFE0;        // Redefined as static constant.
-static const unsigned int __attribute__((used)) magenta = 0x0000F81F;       // Redefined as static constant.
-static const unsigned int __attribute__((used)) cyan = 0x000007FF;          // Redefined as static constant.
-static const unsigned int __attribute__((used)) white = 0x0000FFFF;         // Redefined as static constant.
-static const unsigned int __attribute__((used)) black = 0x0;                // Redefined as static constant.
-
-// Don't change the name of this variables
-#define NCOLS 5 // <- Supported value range: [1,18]
-#define NROWS 16 // <- This variable might change.
-#define TILE_SIZE 15 // <- Tile size, might change.
-
-// Game message strings (required by platform)
-static char *won =  "\n======= You Won ========\n";
-static char *lost = "\n======= You Lost ========\n";
-
-// Screen dimensions (required by platform)
-const unsigned short height = 240;
-const unsigned short width = 320;
-
-// Font data for text rendering (required by platform)
-char font8x8[128][8];
-
-// Legacy tile map (required by platform)
-unsigned char tiles[NROWS][NCOLS] __attribute__((used)) = { 0 };
-/**************************************************************************************************/
-
-unsigned long long __attribute__((used)) UART_BASE = 0xFF201000; // JTAG UART base address
 
 // ===== GAME CONFIGURATION =====
-#define GAME_DELAY          5000   // Delay (clk) cycles for game speed control
+#define NCOLS               5       // <- Ensure that height % (NCOLS * TILE_WIDTH) == 0
+#define NROWS               16      // <- Ensure that width > (NROWS * TILE_HEIGHT)
+#define TILE_HEIGHT         15
+#define TILE_WIDTH          15 
+#define SCALE_FACTOR        1000    // Fixed-point scaling for precise calculations
+#define GAME_DELAY          5000    // Delay (clk) cycles for game speed control
 #define BACKGROUND_COLOR    black
+#define BLOCK_AREA_START_X  (width - (NCOLS * TILE_WIDTH))
+static const unsigned long long __attribute__((used)) VGAaddress = 0xc8000000; // Memory storing pixels
+static const unsigned long long __attribute__((used)) UART_BASE = 0xFF201000;            // JTAG UART base address
+
+static const unsigned short height = 240;                               // Screen dimensions (required by platform)
+static const unsigned short width = 320;
+
+static char *lost = "\n===== You Lost =====\n";
+static char *won =  "\n===== You Won =====\n";
+
+static const unsigned int __attribute__((used)) red = 0x0000F0F0;       // Color code for red using 5-6-5 format       
+static const unsigned int __attribute__((used)) green = 0x00000F0F;         
+static const unsigned int __attribute__((used)) blue = 0x000000FF;          
+static const unsigned int __attribute__((used)) white = 0x0000FFFF;         
+static const unsigned int __attribute__((used)) black = 0x0;                
+static const unsigned int __attribute__((used)) yellow = 0x0000FFE0;        
+static const unsigned int __attribute__((used)) magenta = 0x0000F81F;       
+static const unsigned int __attribute__((used)) cyan = 0x000007FF; 
+
+static const unsigned int block_colors[6] = {red, green, blue, yellow, magenta, cyan};      // Array of colors for the blocks (used in round-robin fashion)
+
+
 
 // Bar Configuration
 #define BAR_X_POS           10
@@ -76,32 +62,42 @@ unsigned long long __attribute__((used)) UART_BASE = 0xFF201000; // JTAG UART ba
 #define BALL_SPEED          1       // Pixels per frame progress
 #define BALL_INIT_DIR_X     707     // Initial direction vector (normalized to SCALE_FACTOR)
 #define BALL_INIT_DIR_Y     500
-#define SCALE_FACTOR        1000    // Fixed-point scaling for precise calculations
 #define BALL_COLOR          blue
 
-// Block Configuration
-#define BLOCK_AREA_START_X  (width - (NCOLS * TILE_SIZE))
-
-// Utility Constants
-#define DUMMY               -1      // No-change indicator
-
-
-typedef struct _tile
-{
-    unsigned char destroyed;
-    unsigned int pos_x;
-    unsigned int pos_y;
-    unsigned int color;
-} Tile;
-
-
-typedef struct _bar
-{
-    unsigned int pos_x;         // x-coordinate of the left of the bar (constant)
-    unsigned int pos_y;         // y-coordinate of the top of the bar
-} Bar;
 
 // ===== TYPE DEFINITIONS =====
+/**
+ * @brief Represents the current state of the game
+ */
+typedef enum _gameState
+{
+    Stopped = 0,
+    Running = 1,
+    Won = 2,
+    Lost = 3,
+    Exit = 4,
+} GameState;
+
+/**
+ *  @brief Represents a single tile/block in the game
+ */
+typedef struct _tile
+{
+    unsigned char destroyed;        // 1 if the block is destroyed, 0 otherwise
+    unsigned int pos_x;             // Top-left x position of the block
+    unsigned int pos_y;             // Top-left y position of the block
+    unsigned int color;            
+} Tile;
+
+/**
+ * @brief Represents the player's bar
+ */
+typedef struct _bar
+{
+    unsigned int pos_x;             // x-coordinate of the left of the bar (constant)
+    unsigned int pos_y;             // y-coordinate of the top of the bar
+} Bar;
+
 
 /**
  * @brief Types of collision objects in the game
@@ -124,7 +120,9 @@ typedef enum {
     WALL_BOTTOM = 4
 } WallHit;
 
-
+/**
+ * @brief Represents the ball in the game
+ */
 typedef struct _ball
 {
     unsigned int pos_x;       // Current visual position
@@ -139,32 +137,23 @@ typedef struct _ball
     int total_distance;       // Total distance from start to next collision
     CollisionType collision_type;   // Type of collision detected
     WallHit wall_hit;              // Specific wall that was hit (for wall collisions)
-    int hit_block_row;        // Row of block that was hit (for block collisions). -1 if no block was hit
-    int hit_block_col;        // Column of block that was hit (for block collisions). -1 if no block was hit
+    unsigned int hit_block_row;        // Row of block that was hit (for block collisions). -1 if no block was hit
+    unsigned int hit_block_col;        // Column of block that was hit (for block collisions). -1 if no block was hit
 } Ball;
 
-typedef enum _gameState
-{
-    Stopped = 0,
-    Running = 1,
-    Won = 2,
-    Lost = 3,
-    Exit = 4,
-} GameState;
 
-
-// Array of colors for the blocks
-static const unsigned int block_colors[6] = {red, green, blue, yellow, magenta, cyan};
 
 // ==== FUNCTION PROTOTYPES =====
 void ClearScreen(unsigned int color);
 void SetPixel(unsigned int x_coord, unsigned int y_coord, unsigned int color);
 void draw_block(unsigned int x, unsigned int y, unsigned int w, unsigned int h, unsigned int color);
-void DrawBar(unsigned int y);
+void game_delay(int cycles);
+void DrawBar();      
 void initialize_bar();
 int ReadUart();
 void WriteUart(char c);
 void draw_ball();
+void erase_ball(unsigned int x, unsigned int y);
 void initialize_ball();
 void print_ball();
 void draw_playing_field();
@@ -178,16 +167,16 @@ void update_ball_state();
 void calculate_next_collision();
 void interpolate_ball_position();
 void handle_ball_collisions();
+void clear_uart();
 void write(char *str);
 void write_int(int value);
 void write_debug(char *msg, int value);
-void game_delay(int cycles);
-void clear_uart();
+int abs(int value); // Custom abs function to avoid using math.h
 
 
 // Initillize global variables
 GameState currentState;
-Tile board_tiles[NROWS][NCOLS] __attribute__((used)); // game board
+Tile board_tiles[NROWS][NCOLS] __attribute__((used)); 
 Ball ball;
 Bar bar;
 
@@ -196,59 +185,36 @@ Bar bar;
     Sets the entire screen to a specific color.
     Assumes colour in RGB888 format (0xRRGGBB).
     Uses the SetPixel assembly function to set each pixel.
-    Arguments:
-    - R0: color (unsigned int, RGB888 format)
+    Arguments: color - color to fill the screen with (unsigned int, RGB565 format)
     Returns: None
 */
-asm("ClearScreen: \n\t"
-    "   PUSH {R4-R11, LR} \n\t"        // Save registers that will be used
-    "   MOV R8, R0 \n\t"               // Store color in R8
-    "   MOV R4, #0 \n\t"               // y = 0
-    "   LDR R6, =height \n\t"          // Load address of height
-    "   LDRH R6, [R6] \n\t"            // Load height value
-    "   LDR R7, =width \n\t"           // Load address of width
-    "   LDRH R7, [R7] \n\t"            // Load width value
-    "y_loop_start: \n\t"
-    "   CMP R4, R6    \n\t"            // compare y with SCREEN_HEIGHT (240)
-    "   BEQ y_loop_end \n\t"
-    "   MOV R5, #0 \n\t"               // x = 0
-    "x_loop_start: \n\t"
-    "   CMP R5, R7 \n\t"               // compare x with SCREEN_WIDTH (320)
-    "   BEQ x_loop_end \n\t"
-    "   MOV R0, R5 \n\t"               // R0 = x
-    "   MOV R1, R4 \n\t"               // R1 = y
-    "   MOV R2, R8 \n\t"               // R2 = color
-    "   BL SetPixel \n\t"              // Call SetPixel(x, y, color)
-    "   ADD R5, R5, #1 \n\t"           // x++
-    "   B x_loop_start \n\t"
-    "x_loop_end: \n\t"
-    "   ADD R4, R4, #1 \n\t"           // y++
-    "   B y_loop_start \n\t"
-    "y_loop_end: \n\t"
-    "   POP {R4-R11, PC} \n\t"          // Restore registers and return
-    "   .ltorg \n\t"                   // Force literal pool here
-);
+void ClearScreen(unsigned int color)
+{
+    for (unsigned int y = 0; y < height; y++)
+    {
+        for (unsigned int x = 0; x < width; x++)
+        {
+            SetPixel(x, y, color);
+        }
+    }
+}
 
 /*
     Sets a pixel at (x_coord, y_coord) to the specified color.
-    Assumes colour in RGB888 format (0xRRGGBB).
     Arguments:
-    - R0: x-coordinate (unsigned int)
-    - R1: y-coordinate (unsigned int)
-    - R2: color (unsigned int, RGB888 format)
+    - x_coord: x-coordinate (unsigned int)
+    - y_coord: y-coordinate (unsigned int)
+    - color: color
     Returns: None
 */
+
 asm("SetPixel: \n\t"
     "LDR R3, =VGAaddress \n\t"
     "LDR R3, [R3] \n\t"
 
     // check if x_coord and y_coord are within bounds. If not, return immediately.
-    "CMP R0, #0 \n\t"
-    "BLT end_setpixel \n\t"
     "CMP R0, #320 \n\t" 
     "BGE end_setpixel \n\t"
-    "CMP R1, #0 \n\t"
-    "BLT end_setpixel \n\t"
     "CMP R1, #240 \n\t" 
     "BGE end_setpixel \n\t"
 
@@ -392,6 +358,10 @@ void game_delay(int cycles)
     for (volatile int i = 0; i < cycles; i++);
 }
 
+int abs(int value)
+{
+    return (value < 0) ? -value : value;
+}
 
 /*
     Draws a block at position (x,y) with width w and height h.
@@ -436,81 +406,44 @@ void draw_block
 }
 
 /*
-    Draws the bar at the specified y position.
-    If y is DUMMY, the bar is drawn at the current position stored in the bar struct.
+    Draws the bar at the current position stored in the bar struct.
     The bar is drawn with a border of BORDER_WIDTH and color BAR_COLOR_EDGES.
     The inside of the bar is filled with BAR_COLOR_CENTER.
-    Arguments:
-    - y: y-coordinate of the top of the bar (unsigned int) or DUMMY to use current position
+    Arguments: None
     Returns: None
 */
-void DrawBar(unsigned int y)
+void DrawBar()
 {
-
-    // Draw the bar at the specified y position.
-    if (y != DUMMY)
-    {
-        // Draw top part of Bar
-        draw_block
-        (
-            bar.pos_x, 
-            y, 
-            BAR_WIDTH, 
-            BAR_EDGE_HEIGHT, 
-            BAR_COLOR_EDGES
-        );    
-        
-        // Draw center part of Bar
-        draw_block
-        (
-            bar.pos_x, 
-            y + BAR_EDGE_HEIGHT, 
-            BAR_WIDTH, 
-            BAR_CENTER_HEIGHT, 
-            BAR_COLOR_CENTER
-        );     
-        
-        // Draw bottom part of Bar
-        draw_block
-        (
-            bar.pos_x, 
-            y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT, 
-            BAR_WIDTH, 
-            BAR_EDGE_HEIGHT, 
-            BAR_COLOR_EDGES
-        ); 
-    } else   // Draw the bar at the current position stored in the bar struct.
-    {
-        // Draw top part of Bar
-        draw_block
-        (
-            bar.pos_x, 
-            bar.pos_y, 
-            BAR_WIDTH, 
-            BAR_EDGE_HEIGHT, 
-            BAR_COLOR_EDGES
-        );    
-        
-        // Draw center part of Bar
-        draw_block
-        (
-            bar.pos_x, 
-            bar.pos_y + BAR_EDGE_HEIGHT, 
-            BAR_WIDTH, 
-            BAR_CENTER_HEIGHT, 
-            BAR_COLOR_CENTER
-        );     
-        
-        // Draw bottom part of Bar
-        draw_block
-        (
-            bar.pos_x, 
-            bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT, 
-            BAR_WIDTH, 
-            BAR_EDGE_HEIGHT, 
-            BAR_COLOR_EDGES
-        ); 
-    }   
+    // Draw top part of Bar
+    draw_block
+    (
+        bar.pos_x, 
+        bar.pos_y, 
+        BAR_WIDTH, 
+        BAR_EDGE_HEIGHT, 
+        BAR_COLOR_EDGES
+    );    
+    
+    // Draw center part of Bar
+    draw_block
+    (
+        bar.pos_x, 
+        bar.pos_y + BAR_EDGE_HEIGHT, 
+        BAR_WIDTH, 
+        BAR_CENTER_HEIGHT, 
+        BAR_COLOR_CENTER
+    );     
+    
+    // Draw bottom part of Bar
+    draw_block
+    (
+        bar.pos_x, 
+        bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT, 
+        BAR_WIDTH, 
+        BAR_EDGE_HEIGHT, 
+        BAR_COLOR_EDGES
+    ); 
+     
 }
 
 
@@ -545,77 +478,39 @@ void update_bar_state()
 
         if ((out & 0xFF) == 0x77) // 'w' - move up
         {
-            if (bar.pos_y >= BAR_SPEED)
-            {
-                bar.pos_y -= BAR_SPEED;
-                DrawBar(DUMMY);
+            if (bar.pos_y >= BAR_SPEED) bar.pos_y -= BAR_SPEED;
+            else bar.pos_y = 0;
+            
+            // draw the space where the bar was previously 
+            draw_block
+            (
+                bar.pos_x, 
+                bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT + BAR_EDGE_HEIGHT, 
+                BAR_WIDTH, 
+                BAR_SPEED, 
+                BACKGROUND_COLOR
+            );
 
-                // draw the space where the bar was previously 
-                draw_block
-                (
-                    bar.pos_x, 
-                    bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT + BAR_EDGE_HEIGHT, 
-                    BAR_WIDTH, 
-                    BAR_SPEED, 
-                    BACKGROUND_COLOR
-                );
-
-                calculate_next_collision(); // recalculate ball trajectory
-            }
-            else if (bar.pos_y > 0)
-            {
-                bar.pos_y = 0;
-                DrawBar(DUMMY);
-
-                // draw the space where the bar was previously 
-                draw_block
-                (
-                    bar.pos_x, 
-                    bar.pos_y + BAR_EDGE_HEIGHT + BAR_CENTER_HEIGHT + BAR_EDGE_HEIGHT, 
-                    BAR_WIDTH, 
-                    bar.pos_y, 
-                    BACKGROUND_COLOR
-                );
-
-                calculate_next_collision(); // recalculate ball trajectory
-            }
+            DrawBar();
+            if (ball.dir_x < 0) calculate_next_collision(); // recalculate ball trajectory only if ball is moving towards the bar      
         }
         else if ((out & 0xFF) == 0x73) // 's' - move down
         {
-            if (bar.pos_y <= ((height - BAR_CENTER_HEIGHT - BAR_EDGE_HEIGHT*2) - BAR_SPEED))
-            {
-                // draw the space where the bar was previously
-                draw_block
-                (
-                    bar.pos_x, 
-                    bar.pos_y , 
-                    BAR_WIDTH, 
-                    BAR_SPEED, 
-                    BACKGROUND_COLOR
-                );
+            // draw the space where the bar was previously
+            draw_block
+            (
+                bar.pos_x, 
+                bar.pos_y , 
+                BAR_WIDTH, 
+                BAR_SPEED, 
+                BACKGROUND_COLOR
+            );
 
-                bar.pos_y += BAR_SPEED;
-                DrawBar(DUMMY);
+            if (bar.pos_y <= ((height - BAR_CENTER_HEIGHT - BAR_EDGE_HEIGHT*2) - BAR_SPEED)) bar.pos_y += BAR_SPEED;
+            else bar.pos_y = height - BAR_CENTER_HEIGHT - BAR_EDGE_HEIGHT - BAR_EDGE_HEIGHT;
 
-                calculate_next_collision(); // recalculate ball trajectory
-            }
-            else if (bar.pos_y < (height - BAR_CENTER_HEIGHT - BAR_EDGE_HEIGHT*2))
-            {
-                // draw the space where the bar was previously
-                draw_block
-                (
-                    bar.pos_x, 
-                    bar.pos_y , 
-                    BAR_WIDTH, 
-                    (height - BAR_CENTER_HEIGHT - BAR_EDGE_HEIGHT*2) - bar.pos_y, 
-                    BACKGROUND_COLOR
-                );
-
-                bar.pos_y = height - BAR_CENTER_HEIGHT - BAR_EDGE_HEIGHT*2;
-                DrawBar(DUMMY);
-
-                calculate_next_collision(); // recalculate ball trajectory
-            }
+            DrawBar();
+            if (ball.dir_x < 0) calculate_next_collision(); // recalculate ball trajectory only if ball is moving towards the bar
         }
         remaining = (out & 0xFF0000) >> 4;
     } while (remaining > 0);
@@ -651,6 +546,25 @@ void draw_ball()
     }
 }
 
+
+/**
+ *   Erases the ball given by (x, y) coordinates over it with the background color.
+    Arguments: None
+    Returns: None
+ */
+void erase_ball(unsigned int x, unsigned int y)
+{
+    for (int i = -BALL_RADIUS; i <= BALL_RADIUS; i++)
+    {
+        for (int j = -BALL_RADIUS; j <= BALL_RADIUS; j++)
+        {
+            if (abs(i) + abs(j) <= BALL_RADIUS)
+            {
+                SetPixel(x + j, y + i, BACKGROUND_COLOR);
+            }
+        }
+    }
+}
 /*
     Prints the current state of the ball to the UART for debugging purposes.
     Arguments: None
@@ -718,11 +632,10 @@ void calculate_next_collision()
     int step_x = ball.dir_x * BALL_SPEED;  
     int step_y = ball.dir_y * BALL_SPEED; 
     
-    // Maximum iterations to prevent infinite loop
-    static const int max_iterations = 1000;
-    int iterations = 0;
     
-    while (iterations < max_iterations)
+    int iterations = 0;
+    // Limit iterations to avoid infinite loops in case of errors
+    while (iterations < SCALE_FACTOR)
     {
         // Advance position by one step
         current_x += step_x;
@@ -769,12 +682,12 @@ void calculate_next_collision()
             break; 
         }
         
-        // Check block collisions - only if ball is in block area
+        // Check block collisions - only if current  iteration is in block area
         if (check_x + BALL_RADIUS >= BLOCK_AREA_START_X)
         {
             // Check rightmost point of the ball for block collision
-            int ball_right_col = (check_x + BALL_RADIUS - BLOCK_AREA_START_X) / TILE_SIZE;
-            int ball_right_row = check_y  / TILE_SIZE;
+            int ball_right_col = (check_x + BALL_RADIUS - BLOCK_AREA_START_X) / TILE_WIDTH;
+            int ball_right_row = check_y  / TILE_HEIGHT;
             
             if (ball_right_col >= 0 && ball_right_col < NCOLS && 
                 ball_right_row >= 0 && ball_right_row < NROWS &&
@@ -787,8 +700,8 @@ void calculate_next_collision()
             }
 
             // Check leftmost point of the ball for block collision
-            int ball_left_col = (check_x - BALL_RADIUS - BLOCK_AREA_START_X) / TILE_SIZE;
-            int ball_left_row = check_y / TILE_SIZE;
+            int ball_left_col = (check_x - BALL_RADIUS - BLOCK_AREA_START_X) / TILE_WIDTH;
+            int ball_left_row = check_y / TILE_HEIGHT;
 
             if (ball_left_col >= 0 && ball_left_col < NCOLS && 
                 ball_left_row >= 0 && ball_left_row < NROWS &&
@@ -801,8 +714,8 @@ void calculate_next_collision()
             }
 
             // Check topmost point of the ball for block collision
-            int ball_top_col = check_x / TILE_SIZE;
-            int ball_top_row = (check_y - BALL_RADIUS) / TILE_SIZE;
+            int ball_top_col = check_x / TILE_WIDTH;
+            int ball_top_row = (check_y - BALL_RADIUS) / TILE_HEIGHT;
 
             if (ball_top_col >= 0 && ball_top_col < NCOLS && 
                 ball_top_row >= 0 && ball_top_row < NROWS &&
@@ -815,8 +728,8 @@ void calculate_next_collision()
             }
 
             // Check bottommost point of the ball for block collision
-            int ball_bottom_col = check_x / TILE_SIZE;
-            int ball_bottom_row = (check_y + BALL_RADIUS) / TILE_SIZE;
+            int ball_bottom_col = check_x / TILE_WIDTH;
+            int ball_bottom_row = (check_y + BALL_RADIUS) / TILE_HEIGHT;
 
             if (ball_bottom_col >= 0 && ball_bottom_col < NCOLS && 
                 ball_bottom_row >= 0 && ball_bottom_row < NROWS &&
@@ -837,7 +750,19 @@ void calculate_next_collision()
     // Calculate total distance for interpolation (in pixels)
     int dx = ball.next_x - ball.start_x;
     int dy = ball.next_y - ball.start_y;
-    ball.total_distance = (int)sqrt(dx*dx + dy*dy);
+
+    // using eulers method to estimate sqrt(dx² + dy²) with integer arithmetic
+    ball.total_distance = SCALE_FACTOR / 2;                 // Initial guess
+    int target_distance_squared = dx * dx + dy * dy;
+    int prev_distance = 0;
+    for (int i = 0; i < 10; i++) {
+        ball.total_distance = (ball.total_distance + target_distance_squared / ball.total_distance) / 2;
+        if (abs(ball.total_distance - prev_distance) < 2) {
+            break; // Stop if change is minimal
+        }
+        prev_distance = ball.total_distance;
+    }
+
     
     // Reset progress
     ball.progress = 0;
@@ -936,8 +861,13 @@ void handle_ball_collisions()
             
             // Newton's method to calculate sqrt(target_x_squared * SCALE_FACTOR)
             int dir_x_magnitude = SCALE_FACTOR / 2; // Initial guess
-            for (int i = 0; i < 8; i++) {
+            int prev_x_magnitude = 0;
+            for (int i = 0; i < 10; i++) {
                 dir_x_magnitude = (dir_x_magnitude + (target_x_squared * SCALE_FACTOR) / dir_x_magnitude) / 2;
+                if (abs(dir_x_magnitude - prev_x_magnitude) < 2) {
+                    break; // Stop if change is minimal
+                }
+                prev_x_magnitude = dir_x_magnitude;
             }
         
             ball.dir_x = dir_x_magnitude;
@@ -975,16 +905,16 @@ void handle_ball_collisions()
         draw_block(
             board_tiles[row][col].pos_x, 
             board_tiles[row][col].pos_y, 
-            TILE_SIZE, 
-            TILE_SIZE, 
+            TILE_WIDTH, 
+            TILE_HEIGHT, 
             BACKGROUND_COLOR
         );
 
         // Get block boundaries
         int block_left = board_tiles[row][col].pos_x;
-        int block_right = board_tiles[row][col].pos_x + TILE_SIZE;
+        int block_right = board_tiles[row][col].pos_x + TILE_WIDTH;
         int block_top = board_tiles[row][col].pos_y;
-        int block_bottom = board_tiles[row][col].pos_y + TILE_SIZE;
+        int block_bottom = board_tiles[row][col].pos_y + TILE_HEIGHT;
 
         // Calculate ball bounding box for collision side determination
         int ball_left = ball.pos_x - BALL_RADIUS;
@@ -1048,20 +978,14 @@ void handle_ball_collisions()
 */
 void update_ball_state()
 {
-    // Erase the ball at its current position
-    draw_block
-    (
-        ball.pos_x - BALL_RADIUS, 
-        ball.pos_y - BALL_RADIUS, 
-        BALL_RADIUS * 2 + 1,
-        BALL_RADIUS * 2 + 1,
-        BACKGROUND_COLOR
-    );
+
+    int prev_x = ball.pos_x;
+    int prev_y = ball.pos_y;
 
     // Advance progress towards next collision
     ball.progress += BALL_SPEED;
     
-    // Check if we've reached the collision point
+    // Check if the ball has reached the collision point
     if ((ball.progress + BALL_RADIUS) >= ball.total_distance)
     {
         // Move to collision point
@@ -1077,12 +1001,12 @@ void update_ball_state()
     }
     else
     {
-        // Interpolate position between start and next collision
+        // Interpolate position between start and next collision for smooth movement
         interpolate_ball_position();
     }
 
-    // Draw the ball at its new position
-    draw_ball();
+    erase_ball(prev_x, prev_y); // Erase ball at previous position
+    draw_ball();                // Draw ball at new position
 }
 
 
@@ -1098,8 +1022,8 @@ void initilize_board_tiles()
     {
         for (int col = 0; col < NCOLS; col++)
         {
-            board_tiles[row][col].pos_x = width - (TILE_SIZE * (NCOLS - col));
-            board_tiles[row][col].pos_y = height - (TILE_SIZE * (NROWS - row));
+            board_tiles[row][col].pos_x = width - (TILE_WIDTH * (NCOLS - col));
+            board_tiles[row][col].pos_y = height - (TILE_HEIGHT * (NROWS - row));
             board_tiles[row][col].color = block_colors[(col + row) % 6];  
             board_tiles[row][col].destroyed = 0;
         }
@@ -1124,8 +1048,8 @@ void draw_playing_field()
             (
                 board_tiles[row][col].pos_x,
                 board_tiles[row][col].pos_y,
-                TILE_SIZE,
-                TILE_SIZE,
+                TILE_WIDTH,
+                TILE_HEIGHT,
                 board_tiles[row][col].color
             );   
         }
@@ -1173,7 +1097,7 @@ void reset()
 
     // Draw initial screen
     ClearScreen(BACKGROUND_COLOR);
-    DrawBar(DUMMY);
+    DrawBar();
     draw_ball();
     draw_playing_field();
 
@@ -1214,7 +1138,7 @@ void wait_for_start()
     initialize_ball();
 
     // Draw initial screen
-    DrawBar(DUMMY);
+    DrawBar();
     draw_ball();
     draw_playing_field();
 
@@ -1291,9 +1215,9 @@ void play()
 */
 int main(int argc, char *argv[])
 {
+    wait_for_start();
     while (1)
     {
-        wait_for_start();
         play();
         reset();
         if (currentState == Exit)
@@ -1301,5 +1225,7 @@ int main(int argc, char *argv[])
             break;
         }
     } 
+    clear_uart();
+    write("GoodBye. Thanks for playing! Hope you had fun :)\n");
     return 0;
 }
