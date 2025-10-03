@@ -212,20 +212,12 @@ asm("SetPixel: \n\t"
     "LDR R3, =VGAaddress \n\t"
     "LDR R3, [R3] \n\t"
 
-    // check if x_coord and y_coord are within bounds. If not, return immediately.
-    "CMP R0, #320 \n\t" 
-    "BGE end_setpixel \n\t"
-    "CMP R1, #240 \n\t" 
-    "BGE end_setpixel \n\t"
-
     // Calculate address: base + (y * 320 + x) * 2
     "LSL R1, R1, #10 \n\t"
     "LSL R0, R0, #1 \n\t"
     "ADD R1, R0 \n\t"
     "STRH R2, [R3,R1] \n\t"
 
-    // Return
-    "end_setpixel: \n\t"
     "BX LR \n\t"
     "   .ltorg \n\t"                   // Force literal pool here
 );
@@ -394,6 +386,14 @@ void draw_block
     unsigned int color      // color to fill the block with (unsigned int, RGB888 format)
 )
 {
+    if (x + w > width || y + h > height) 
+    {
+        write_debug("draw_block out of bounds: x=", x);
+        write_debug(" y=", y);
+        write_debug(" w=", w);
+        write_debug(" h=", h);
+        return; // Out of bounds, do nothing
+    }
     unsigned int i, j;
 
     // Fill the entire block with the given color
@@ -538,7 +538,10 @@ void draw_ball()
     {
         for (int j = -BALL_RADIUS; j <= BALL_RADIUS; j++)
         {
-            if (abs(i) + abs(j) <= BALL_RADIUS)
+            if (abs(i) + abs(j) <= BALL_RADIUS && 
+                ball.pos_x + j < width && 
+                ball.pos_y + i < height
+            ) 
             {
                 SetPixel(ball.pos_x + j, ball.pos_y + i, BALL_COLOR);
             }
@@ -558,7 +561,10 @@ void erase_ball(unsigned int x, unsigned int y)
     {
         for (int j = -BALL_RADIUS; j <= BALL_RADIUS; j++)
         {
-            if (abs(i) + abs(j) <= BALL_RADIUS)
+            if (abs(i) + abs(j) <= BALL_RADIUS &&
+                ball.pos_x + j < width && 
+                ball.pos_y + i < height
+            ) 
             {
                 SetPixel(x + j, y + i, BACKGROUND_COLOR);
             }
