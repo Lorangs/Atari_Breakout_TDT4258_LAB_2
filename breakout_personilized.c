@@ -212,7 +212,7 @@ asm("SetPixel: \n\t"
     "LDR R3, =VGAaddress \n\t"
     "LDR R3, [R3] \n\t"
 
-    // Calculate address: base + (y * 320 + x) * 2
+    // Calculate address: base + (y * 320 + x) 
     "LSL R1, R1, #10 \n\t"
     "LSL R0, R0, #1 \n\t"
     "ADD R1, R0 \n\t"
@@ -538,9 +538,9 @@ void draw_ball()
     {
         for (int j = -BALL_RADIUS; j <= BALL_RADIUS; j++)
         {
-            if (abs(i) + abs(j) <= BALL_RADIUS && 
-                ball.pos_x + j < width && 
-                ball.pos_y + i < height
+            if (abs(i) + abs(j) <= BALL_RADIUS && (
+                ball.pos_x + j <= width && 
+                ball.pos_y + i <= height)
             ) 
             {
                 SetPixel(ball.pos_x + j, ball.pos_y + i, BALL_COLOR);
@@ -562,8 +562,8 @@ void erase_ball(unsigned int x, unsigned int y)
         for (int j = -BALL_RADIUS; j <= BALL_RADIUS; j++)
         {
             if (abs(i) + abs(j) <= BALL_RADIUS &&
-                ball.pos_x + j < width && 
-                ball.pos_y + i < height
+                ball.pos_x + j <= width && 
+                ball.pos_y + i <= height
             ) 
             {
                 SetPixel(x + j, y + i, BACKGROUND_COLOR);
